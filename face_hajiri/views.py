@@ -82,12 +82,12 @@ def store_in_time(name, id, device, current_time, state):
             print('attendance serializer is invalid')
 
 
-
 class NumpyArrayEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         return JSONEncoder.default(self, obj)
+
 
 class RegistrationView(APIView):
     def post(self, request):
@@ -177,7 +177,7 @@ class VerificationView(APIView):
                     # aggregate matched user data
                     name = attendee_names[match_index].upper()
                     id = attendee_ids[match_index]
-                    recognized_faces.append({'name':name, 'id':id})
+                    # recognized_faces.append({'name':name, 'id':id})
 
                     # write data to database
                     rows = Attendance.objects.filter(date=datetime.now().date()).filter(attendee_name=name, attendee_id=id)
@@ -188,12 +188,15 @@ class VerificationView(APIView):
                         if row.out_time is None:
                             row.out_time = current_time
                             row.save()
+                            recognized_faces.append({'name':name, 'id':id, 'state':'out'})
                         elif isinstance(row.in_time, datetime):
                             store_in_time(name, id, serializer_data['device'], current_time, state='in')
+                            recognized_faces.append({'name':name, 'id':id, 'state':'in'})
                            
                     else:
                         '''If no rocord is found'''
                         store_in_time(name, id, serializer_data['device'], current_time, state='in')
+                        recognized_faces.append({'name':name, 'id':id, 'state':'in'})
 
             #         y1, x2, y2, x1 = face_loc
             #         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -205,8 +208,15 @@ class VerificationView(APIView):
 
 class UserDetailsView(APIView):
     def get(self, request):
+        global stored_encodings
+        global attendee_names
+        global attendee_ids
+        
+        if stored_encodings is None or attendee_names is None or attendee_ids is None:
+            stored_encodings, attendee_names, attendee_ids = get_user_data()
+            
         reg_data = Registration.objects.all()#.distinct()       # distinct changes sequential order
         reg_data = UserDetailsSerializer(reg_data, many=True)
 
-        return Response({'Acknowledge': reg_data.data})
+        return Response({'Acknowledge': reg_data.data, 'ids':attendee_ids})
 
