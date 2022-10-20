@@ -23,6 +23,7 @@ from core.utils import gen_encoding, automatic_brightness_and_contrast
 stored_encodings = None
 attendee_names = None
 attendee_ids = None
+duration = 90   # in seconds
 
 def base64_img(img_str):
     image = base64.b64decode((img_str))
@@ -34,7 +35,7 @@ def base64_img(img_str):
 
 def img_preprocessing(img_str):
     image = base64_img(img_str)
-    # cv2.imwrite('temp.jpg', image)
+    cv2.imwrite('detections/image.jpg', image)
     # print(type(image), image.shape)
     return gen_encoding([image])
 
@@ -105,39 +106,41 @@ class RegistrationView(APIView):
         except:
             data = request.POST
             print("in except")
-        
-        if data['attendee_id'] in attendee_ids:
-            return Response({'acknowledge' : 'ID exists.'})
-        
-        # generation of face_encoding
-        if data['image_base64']:
-            try:
-                face_encoding = img_preprocessing(data['image_base64'])
-                print('face encoding completed')
-                face_encoding = {"face_embedding": face_encoding}
-                encoded_face_encoding = json.dumps(face_encoding, cls=NumpyArrayEncoder)
-            except:
-                return Response({'Acknowledge':'invalid image data'})
-        
-        # dict used in generation of query dict
-        data_ = {
-            'attendee_name' : data['attendee_name'],
-            'attendee_id' : data['attendee_id'],
-            'registration_device' : data['registration_device'],
-            'department' : data['department'],
-            'image_base64' : data['image_base64'],
-            'face_embedding' : encoded_face_encoding,
-        }
-        query_dict = QueryDict('', mutable=True)
-        query_dict.update(data_)
 
-        serializer = RegistrationSerializer(data=query_dict)
-        if serializer.is_valid():
-            serializer.save()
-            stored_encodings, attendee_names, attendee_ids = get_user_data()
+        if data['attendee_name'] and data['attendee_id'] and data['registration_device'] and data['image_base64']:
+            if data['attendee_id'] in attendee_ids:
+                return Response({'Acknowledge' : 'ID already exists'})
             
-            return Response({'Acknowledge':'Done'})
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            # generation of face_encoding
+            if data['image_base64']:
+                try:
+                    face_encoding = img_preprocessing(data['image_base64'])
+                    print('face encoding completed')
+                    face_encoding = {"face_embedding": face_encoding}
+                    encoded_face_encoding = json.dumps(face_encoding, cls=NumpyArrayEncoder)
+                except:
+                    return Response({'Acknowledge':'invalid image data'})
+            
+            # dict used in generation of query dict
+            data_ = {
+                'attendee_name' : data['attendee_name'].strip(),
+                'attendee_id' : data['attendee_id'].strip(),
+                'registration_device' : data['registration_device'].strip(),
+                'department' : data['department'],
+                'image_base64' : data['image_base64'],
+                'face_embedding' : encoded_face_encoding,
+            }
+            query_dict = QueryDict('', mutable=True)
+            query_dict.update(data_)
+
+            serializer = RegistrationSerializer(data=query_dict)
+            if serializer.is_valid():
+                serializer.save()
+                stored_encodings, attendee_names, attendee_ids = get_user_data()
+                
+                return Response({'Acknowledge':'User Created successfully'})
+            return Response({'Acknowledge':serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'Acknowledge':'some fields are missing'})
 
 
 
@@ -156,6 +159,7 @@ class VerificationView(APIView):
         except:
             data = request.POST
             print("in except")
+        
 
         serializer = FaceVerificationSerializer(data=data)
         if serializer.is_valid():
@@ -169,7 +173,7 @@ class VerificationView(APIView):
             encoded_face_in_frame = face_recognition.face_encodings(image, face_cropped)
             recognized_faces = []
             for encode_face, face_loc in zip(encoded_face_in_frame, face_cropped):
-                matches = face_recognition.compare_faces(stored_encodings, encode_face)
+                matches = face_recognition.compare_faces(stored_encodings, encode_face, tolerance=0.45)
                 face_dist = face_recognition.face_distance(stored_encodings, encode_face)
                 match_index = np.argmin(face_dist)
                 # matched_face_distance = face_dist[match_index]
@@ -186,12 +190,17 @@ class VerificationView(APIView):
                         '''If any rocord is found'''
                         row = rows.order_by('-in_time')[:1].get()
                         if row.out_time is None:
-                            row.out_time = current_time
-                            row.save()
-                            recognized_faces.append({'name':name, 'id':id, 'state':'out'})
+                            # save only if duration exceeds threshold
+                            diff = datetime.now() - row.in_time
+                            if diff.total_seconds() > duration:
+                                row.out_time = current_time
+                                row.save()
+                                recognized_faces.append({'name':name, 'id':id, 'state':'out'})
                         elif isinstance(row.in_time, datetime):
-                            store_in_time(name, id, serializer_data['device'], current_time, state='in')
-                            recognized_faces.append({'name':name, 'id':id, 'state':'in'})
+                            diff = datetime.now() - row.out_time
+                            if diff.total_seconds() > duration:
+                                store_in_time(name, id, serializer_data['device'], current_time, state='in')
+                                recognized_faces.append({'name':name, 'id':id, 'state':'in'})
                            
                     else:
                         '''If no rocord is found'''
