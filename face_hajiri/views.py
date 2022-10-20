@@ -30,13 +30,12 @@ def base64_img(img_str):
     image = Image.open(io.BytesIO(image))
     image = np.array(image)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # cv2.imwrite('detections/image.jpg', image)
     return image
 
 
 def img_preprocessing(img_str):
     image = base64_img(img_str)
-    cv2.imwrite('detections/image.jpg', image)
-    # print(type(image), image.shape)
     return gen_encoding([image])
 
 def get_user_data():
