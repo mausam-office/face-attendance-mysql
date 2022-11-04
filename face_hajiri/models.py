@@ -11,9 +11,15 @@ class Registration(models.Model):
     face_embedding = models.JSONField()
     created_on = models.DateTimeField(auto_now_add=True)
     
+def upload_path_overwrite(instance, name):
+    # current_dt = datetime.now()
+    filename = 'face.jpg'
+    return filename
+    # return '/'.join(['media', filename])
 
 class FaceVerification(models.Model):
-    image_base64 = models.TextField()
+    # image_base64 = models.TextField()
+    image_base64 = models.ImageField(upload_to=upload_path_overwrite)
     device = models.CharField(max_length=64)
 
 

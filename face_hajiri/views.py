@@ -1,3 +1,4 @@
+from email.mime import image
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -6,6 +7,7 @@ from django.http import QueryDict
 from .models import Registration, Attendance
 from .serializers import RegistrationSerializer, FaceVerificationSerializer, AttendanceSerializer, UserDetailsSerializer
 
+import os
 import io
 import base64
 from PIL import Image
@@ -153,23 +155,42 @@ class VerificationView(APIView):
         
         if stored_encodings is None or attendee_names is None or attendee_ids is None:
             stored_encodings, attendee_names, attendee_ids = get_user_data()
-
+        
         start = time.time()
+        try:
+            for filename in os.listdir('/'.join([os.getcwd(), 'media/'])):
+                filepath = '/'.join([os.getcwd(), f"media/{filename}"])
+                os.remove(filepath)
+        except:
+            pass
+
         try:
             data = request.data
             print("try")
         except:
             data = request.POST
             print('ex')
-        print('data arrived')
+        print(f'data arrived {data}')
         
         serializer = FaceVerificationSerializer(data=data)
         if serializer.is_valid():
+            print('valid')
             current_time = datetime.now()
-            serializer_data = serializer.data
+            # serializer_data = serializer.data
+            
+            # added
+            serializer_data = serializer.initial_data
+            serializer.save()
 
-            img_str = serializer_data['image_base64']
-            image = base64_img(img_str)
+            # commented
+            # img_str = serializer_data['image_base64']
+            # image = base64_img(img_str)
+
+            # changed to
+            filepath = '/'.join([os.getcwd(), 'media/face.jpg'])
+            image = cv2.imread(filepath)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
 
             face_cropped = face_recognition.face_locations(image, model = "cnn")
             encoded_face_in_frame = face_recognition.face_encodings(image, face_cropped)
