@@ -15,6 +15,7 @@ import face_recognition
 from datetime import datetime
 import json
 from json import JSONEncoder
+import time
 
 from core.utils import gen_encoding, automatic_brightness_and_contrast
 
@@ -23,7 +24,7 @@ from core.utils import gen_encoding, automatic_brightness_and_contrast
 stored_encodings = None
 attendee_names = None
 attendee_ids = None
-duration = 90   # in seconds
+duration = 20   # in seconds
 
 def base64_img(img_str):
     image = base64.b64decode((img_str))
@@ -95,51 +96,52 @@ class RegistrationView(APIView):
         global attendee_names
         global attendee_ids
 
-        if stored_encodings is None or attendee_names is None or attendee_ids is None:
-            stored_encodings, attendee_names, attendee_ids = get_user_data()
-            
+        
         # data grabbing
         try:
             data = request.data
-            print("In try")
+            print("try")
         except:
             data = request.POST
-            print("in except")
+            print('ex')
+        print(data)
 
-        if data['attendee_name'] and data['attendee_id'] and data['registration_device'] and data['image_base64']:
-            if data['attendee_id'] in attendee_ids:
-                return Response({'Acknowledge' : 'ID already exists'})
-            
-            # generation of face_encoding
-            if data['image_base64']:
-                try:
-                    face_encoding = img_preprocessing(data['image_base64'])
-                    print('face encoding completed')
-                    face_encoding = {"face_embedding": face_encoding}
-                    encoded_face_encoding = json.dumps(face_encoding, cls=NumpyArrayEncoder)
-                except:
-                    return Response({'Acknowledge':'invalid image data'})
-            
-            # dict used in generation of query dict
-            data_ = {
-                'attendee_name' : data['attendee_name'].strip(),
-                'attendee_id' : data['attendee_id'].strip(),
-                'registration_device' : data['registration_device'].strip(),
-                'department' : data['department'],
-                'image_base64' : data['image_base64'],
-                'face_embedding' : encoded_face_encoding,
-            }
-            query_dict = QueryDict('', mutable=True)
-            query_dict.update(data_)
+        # if data['attendee_id'] in attendee_ids:
+        #     return Response({'Acknowledge' : 'ID already exists'})
+        
+        # generation of face_encoding
+        if data['image_base64']:
+            try:
+                face_encoding = img_preprocessing(data['image_base64'])
+                print('face encoding completed')
+                face_encoding = {"face_embedding": face_encoding}
+                print('dict built')
+                encoded_face_encoding = json.dumps(face_encoding, cls=NumpyArrayEncoder)
+                print("json built")
+            except:
+                return Response({'Acknowledge':'invalid image data'})
+        
+        # dict used in generation of query dict
+        data_ = {
+            'attendee_name' : data['attendee_name'].strip(),
+            'attendee_id' : data['attendee_id'].strip(),
+            'registration_device' : data['registration_device'].strip(),
+            'department' : data['department'],
+            'image_base64' : data['image_base64'],
+            'face_embedding' : encoded_face_encoding,
+        }
+        query_dict = QueryDict('', mutable=True)
+        query_dict.update(data_)
 
-            serializer = RegistrationSerializer(data=query_dict)
-            if serializer.is_valid():
-                serializer.save()
-                stored_encodings, attendee_names, attendee_ids = get_user_data()
-                
-                return Response({'Acknowledge':'User Created successfully'})
-            return Response({'Acknowledge':serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'Acknowledge':'some fields are missing'})
+        serializer = RegistrationSerializer(data=query_dict)
+        if serializer.is_valid():
+            serializer.save()
+            stored_encodings, attendee_names, attendee_ids = get_user_data()
+            
+            return Response({'Acknowledge':'User Created successfully'})
+        print(serializer.errors)
+        return Response({'Acknowledge':serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 
@@ -152,19 +154,20 @@ class VerificationView(APIView):
         if stored_encodings is None or attendee_names is None or attendee_ids is None:
             stored_encodings, attendee_names, attendee_ids = get_user_data()
 
+        start = time.time()
         try:
             data = request.data
-            print("In try")
+            print("try")
         except:
             data = request.POST
-            print("in except")
+            print('ex')
+        print('data arrived')
         
-
         serializer = FaceVerificationSerializer(data=data)
         if serializer.is_valid():
             current_time = datetime.now()
             serializer_data = serializer.data
-            # print(f"device: {serializer_data['device']}")
+
             img_str = serializer_data['image_base64']
             image = base64_img(img_str)
 
@@ -174,44 +177,49 @@ class VerificationView(APIView):
             for encode_face, face_loc in zip(encoded_face_in_frame, face_cropped):
                 matches = face_recognition.compare_faces(stored_encodings, encode_face, tolerance=0.45)
                 face_dist = face_recognition.face_distance(stored_encodings, encode_face)
-                match_index = np.argmin(face_dist)
-                # matched_face_distance = face_dist[match_index]
-                if matches[match_index]:
-                    # aggregate matched user data
-                    name = attendee_names[match_index].upper()
-                    id = attendee_ids[match_index]
-                    # recognized_faces.append({'name':name, 'id':id})
+                try:
+                    match_index = np.argmin(face_dist)
+                    # matched_face_distance = face_dist[match_index]
+                    if matches[match_index]:
+                        # aggregate matched user data
+                        name = attendee_names[match_index].upper()
+                        id = attendee_ids[match_index]
+                        dist = face_dist[match_index]
+                        # recognized_faces.append({'name':name, 'id':id})
 
-                    # write data to database
-                    rows = Attendance.objects.filter(date=datetime.now().date()).filter(attendee_name=name, attendee_id=id)
+                        # write data to database
+                        rows = Attendance.objects.filter(date=datetime.now().date()).filter(attendee_name=name, attendee_id=id)
 
-                    if rows:
-                        '''If any rocord is found'''
-                        row = rows.order_by('-in_time')[:1].get()
-                        if row.out_time is None:
-                            # save only if duration exceeds threshold
-                            diff = datetime.now() - row.in_time
-                            if diff.total_seconds() > duration:
-                                row.out_time = current_time
-                                row.save()
-                                recognized_faces.append({'name':name, 'id':id, 'state':'out'})
-                        elif isinstance(row.in_time, datetime):
-                            diff = datetime.now() - row.out_time
-                            if diff.total_seconds() > duration:
-                                store_in_time(name, id, serializer_data['device'], current_time, state='in')
-                                recognized_faces.append({'name':name, 'id':id, 'state':'in'})
-                           
-                    else:
-                        '''If no rocord is found'''
-                        store_in_time(name, id, serializer_data['device'], current_time, state='in')
-                        recognized_faces.append({'name':name, 'id':id, 'state':'in'})
+                        if rows:
+                            '''If any rocord is found'''
+                            row = rows.order_by('-in_time')[:1].get()
+                            if row.out_time is None:
+                                # save only if duration exceeds threshold
+                                diff = datetime.now() - row.in_time
+                                if diff.total_seconds() > duration:
+                                    row.out_time = current_time
+                                    row.save()
+                                    recognized_faces.append({'name':name, 'id':id, 'state':'out', 'current_time':current_time, 'dist':dist})
+                            elif isinstance(row.in_time, datetime):
+                                diff = datetime.now() - row.out_time
+                                if diff.total_seconds() > duration:
+                                    store_in_time(name, id, serializer_data['device'], current_time, state='in')
+                                    recognized_faces.append({'name':name, 'id':id, 'state':'in', 'current_time':current_time, 'dist':dist})
+                            
+                        else:
+                            '''If no rocord is found'''
+                            store_in_time(name, id, serializer_data['device'], current_time, state='in')
+                            recognized_faces.append({'name':name, 'id':id, 'state':'in', 'current_time':current_time, 'dist':dist})
 
-            #         y1, x2, y2, x1 = face_loc
-            #         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            #         cv2.putText(image, name, (x1+6, y2-6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
-            # cv2.imwrite('detections/detection.jpg', image)            
-
-            return Response({'Acknowledge':recognized_faces})
+                    #         y1, x2, y2, x1 = face_loc
+                    #         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    #         cv2.putText(image, name, (x1+6, y2-6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
+                    # cv2.imwrite('detections/detection.jpg', image)  
+                    print(recognized_faces)          
+                    print(f'Verification time: {time.time()-start}')
+                    return Response({'Acknowledge':recognized_faces})
+                except:
+                    return Response({'Acknowledge':'no any registered faces'})
         return Response({'Acknowledge':'error'})
 
 class UserDetailsView(APIView):
