@@ -1,6 +1,13 @@
 from django.db import models
 
 
+def upload_path_overwrite(instance, name):
+    # current_dt = datetime.now()
+    filename = 'face.jpg'
+    return filename
+    # return '/'.join(['media', filename])
+
+
 class Registration(models.Model):
     attendee_name = models.CharField(max_length=64)
     attendee_id = models.CharField(max_length=40)
@@ -11,11 +18,6 @@ class Registration(models.Model):
     face_embedding = models.JSONField()
     created_on = models.DateTimeField(auto_now_add=True)
     
-def upload_path_overwrite(instance, name):
-    # current_dt = datetime.now()
-    filename = 'face.jpg'
-    return filename
-    # return '/'.join(['media', filename])
 
 class FaceVerification(models.Model):
     # image_base64 = models.TextField()

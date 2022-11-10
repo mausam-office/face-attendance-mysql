@@ -26,7 +26,7 @@ from core.utils import gen_encoding, automatic_brightness_and_contrast
 stored_encodings = None
 attendee_names = None
 attendee_ids = None
-duration = 20   # in seconds
+duration = 60   # in seconds
 
 def base64_img(img_str):
     image = base64.b64decode((img_str))
@@ -39,7 +39,14 @@ def base64_img(img_str):
 
 def img_preprocessing(img_str):
     image = base64_img(img_str)
-    return gen_encoding([image])
+    # can do register only when single face is encountered
+    # Returns list of tuples: one for each face
+    # if more than one face appears return 
+    face_cropped = face_recognition.face_locations(image, model = "cnn")
+    if len(face_cropped) > 1:
+        return Response({'Acknowledge' : 'Multiple Faces Detected.'}, status=status.HTTP_206_PARTIAL_CONTENT)
+    else:
+        return gen_encoding([image])
 
 def get_user_data():
     reg = Registration.objects.all()
@@ -93,6 +100,19 @@ class NumpyArrayEncoder(JSONEncoder):
 
 
 class RegistrationView(APIView):
+    # def img_preprocessing(self, img_str):
+    #     image = base64_img(img_str)
+    #     # can do register only when single face is encountered
+    #     # Returns list of tuples: one for each face
+    #     # if more than one face appears return 
+    #     face_cropped = face_recognition.face_locations(image, model = "cnn")
+    #     print('faces num: ', len(face_cropped), type(len(face_cropped)))
+    #     if len(face_cropped) > 1:
+            
+    #         return Response({'Acknowledge' : 'Multiple Faces Detected.'}, status=status.HTTP_206_PARTIAL_CONTENT)
+    #     else:
+    #         return gen_encoding([image])
+
     def post(self, request):
         global stored_encodings
         global attendee_names
@@ -102,14 +122,14 @@ class RegistrationView(APIView):
         # data grabbing
         try:
             data = request.data
-            print("try")
+            # print("try")
         except:
             data = request.POST
-            print('ex')
-        print(data)
+            # print('ex')
+        # print(data)
 
-        # if data['attendee_id'] in attendee_ids:
-        #     return Response({'Acknowledge' : 'ID already exists'})
+        if data['attendee_id'] in attendee_ids:
+            return Response({'Acknowledge' : 'ID already exists'}, status=status.HTTP_208_ALREADY_REPORTED)
         
         # generation of face_encoding
         if data['image_base64']:
@@ -121,7 +141,7 @@ class RegistrationView(APIView):
                 encoded_face_encoding = json.dumps(face_encoding, cls=NumpyArrayEncoder)
                 print("json built")
             except:
-                return Response({'Acknowledge':'invalid image data'})
+                return Response({'Acknowledge':'invalid image data'}, status=status.HTTP_206_PARTIAL_CONTENT)
         
         # dict used in generation of query dict
         data_ = {
@@ -140,7 +160,7 @@ class RegistrationView(APIView):
             serializer.save()
             stored_encodings, attendee_names, attendee_ids = get_user_data()
             
-            return Response({'Acknowledge':'User Created successfully'})
+            return Response({'Acknowledge':'User Created successfully'}, status=status.HTTP_200_OK)
         print(serializer.errors)
         return Response({'Acknowledge':serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -166,15 +186,15 @@ class VerificationView(APIView):
 
         try:
             data = request.data
-            print("try")
+            # print("try")
         except:
             data = request.POST
-            print('ex')
-        print(f'data arrived {data}')
+            # print('ex')
+        # print(f'data arrived {data}')
         
         serializer = FaceVerificationSerializer(data=data)
         if serializer.is_valid():
-            print('valid')
+            # print('valid')
             current_time = datetime.now()
             # serializer_data = serializer.data
             
@@ -188,11 +208,16 @@ class VerificationView(APIView):
 
             # changed to
             filepath = '/'.join([os.getcwd(), 'media/face.jpg'])
-            image = cv2.imread(filepath)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # image = cv2.imread(filepath)
+            # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+            # OR Check the image reading with PIL 
+            image = Image.open(filepath)
+            image = np.array(image)
 
 
             face_cropped = face_recognition.face_locations(image, model = "cnn")
+            # print(f'Number of faces {len(face_cropped)}')
             encoded_face_in_frame = face_recognition.face_encodings(image, face_cropped)
             recognized_faces = []
             for encode_face, face_loc in zip(encoded_face_in_frame, face_cropped):
@@ -235,12 +260,13 @@ class VerificationView(APIView):
                     #         y1, x2, y2, x1 = face_loc
                     #         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     #         cv2.putText(image, name, (x1+6, y2-6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 1)
-                    # cv2.imwrite('detections/detection.jpg', image)  
-                    print(recognized_faces)          
-                    print(f'Verification time: {time.time()-start}')
-                    return Response({'Acknowledge':recognized_faces})
+                    # cv2.imwrite('detections/detection.jpg', image)   
                 except:
                     return Response({'Acknowledge':'no any registered faces'})
+
+            # print(recognized_faces)          
+            # print(f'Verification time: {time.time()-start}')
+            return Response({'Acknowledge':recognized_faces})
         return Response({'Acknowledge':'error'})
 
 class UserDetailsView(APIView):
